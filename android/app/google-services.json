@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "661764855390",
+    "project_id": "absensi-santri-nuris",
+    "storage_bucket": "absensi-santri-nuris.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:661764855390:android:cd41277cee7e0e64c1c6cf",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_3"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3eiPUtWdqYlTrQKJn7cfkmdlA0TsEjdc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

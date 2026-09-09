@@ -1,0 +1,1 @@
+{"firestore":{"rules":"firestore.rules"},"flutter":{"platforms":{"android":{"default":{"projectId":"absensi-santri-nuris","appId":"1:661764855390:android:cd41277cee7e0e64c1c6cf","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"absensi-santri-nuris","configurations":{"android":"1:661764855390:android:cd41277cee7e0e64c1c6cf"}}}}}}

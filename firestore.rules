@@ -1,0 +1,177 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: ambil data user yang sedang login dari collection 'users'
+    function currentUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function currentRole() {
+      return currentUserData().role;
+    }
+
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    // Staff = punya dokumen pendaftaran di collection 'users'.
+    // Santri memakai auth anonymous dan TIDAK punya dokumen di 'users'.
+    function isStaff() {
+      return isLoggedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // NIS milik anonymous uid, dibaca dari collection 'santri_auth'.
+    // Dipakai untuk memverifikasi "izin milik sendiri" milik santri.
+    function santriNis() {
+      return get(/databases/$(database)/documents/santri_auth/$(request.auth.uid)).data.nis;
+    }
+
+    function isSantriUser() {
+      return isLoggedIn() && !isStaff() && santriNis() != null;
+    }
+
+    function isSuperAdmin() {
+      return isLoggedIn() && currentRole() == 'super_admin';
+    }
+
+    function isSekretaris() {
+      return isLoggedIn() && currentRole() == 'sekretaris';
+    }
+
+    function isAdminOrSekretaris() {
+      return isSuperAdmin() || isSekretaris();
+    }
+
+    function isPengabsen() {
+      return isLoggedIn() && currentRole() == 'pengabsen';
+    }
+
+    // Staff yang boleh mencatat absensi (santri maupun guru)
+    function isPencatatAbsensi() {
+      return isAdminOrSekretaris() || isPengabsen();
+    }
+
+    function isWaliKelas() {
+      return isStaff() && currentRole() == 'wali_kelas';
+    }
+
+    // Staff yang boleh memproses izin (setujui/tolak) & menulis izin_harian
+    function isStaffKelolaIzin() {
+      return isAdminOrSekretaris() || isWaliKelas();
+    }
+
+    // ── users ──
+    // Tiap user cuma boleh baca datanya sendiri, atau semua staff boleh baca
+    // (dipakai untuk daftar guru di absensi guru). Field 'role' cuma boleh
+    // diubah oleh super_admin — mencegah user self-upgrade jadi admin.
+    match /users/{userId} {
+      allow read: if isLoggedIn() && (request.auth.uid == userId || isStaff());
+      allow create: if isSuperAdmin();
+      allow update: if isLoggedIn() && (
+        // User biasa boleh update datanya sendiri TAPI TIDAK boleh ubah field role
+        (request.auth.uid == userId &&
+          request.resource.data.role == resource.data.role) ||
+        isSuperAdmin()
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── kelas ──
+    match /kelas/{kelasId} {
+      allow read: if isLoggedIn();
+      allow write: if isAdminOrSekretaris();
+    }
+
+    // ── santri ──
+    // Semua yang login boleh baca (buat proses scan, login santri, & laporan).
+    // Yang boleh tambah/edit data santri cuma admin/sekretaris.
+    match /santri/{santriId} {
+      allow read: if isLoggedIn();
+      allow write: if isAdminOrSekretaris();
+    }
+
+    // ── absensi_log ──
+    // Pengabsen boleh BIKIN catatan absensi baru (dari scan QR),
+    // tapi TIDAK BOLEH edit/hapus data absensi yang sudah tercatat
+    // (cegah kecurangan/ubah data setelah absen). Admin/sekretaris bebas.
+    match /absensi_log/{logId} {
+      allow read: if isLoggedIn();
+      allow create: if isLoggedIn() && (isPengabsen() || isAdminOrSekretaris());
+      allow update, delete: if isAdminOrSekretaris();
+    }
+
+    // ── guru ──
+    // Daftar guru (nama) untuk absensi guru. Semua yang login boleh baca;
+    // hanya pencatat absensi (super_admin/sekretaris/pengabsen) yang boleh
+    // tambah/hapus guru.
+    match /guru/{guruId} {
+      allow read: if isLoggedIn();
+      allow write: if isPencatatAbsensi();
+    }
+
+    // ── absensi_guru ──
+    // Catatan kehadiran guru (id = "{guruId}_{tanggal}_{sesi}").
+    // Semua yang login boleh baca untuk laporan; yang boleh mencatat
+    // cuma pengabsen / super_admin / sekretaris.
+    match /absensi_guru/{docId} {
+      allow read: if isLoggedIn();
+      allow write: if isPencatatAbsensi();
+    }
+
+    // ── izin ──
+    // Dibaca: staff lihat semua; santri cuma boleh lihat izin miliknya sendiri.
+    // Dibuat: cuma santri (auth anonymous) yang BISA buat izin baru, dengan
+    // status dijamin 'pending' & tanpa 'diprosesOleh' (tidak bisa self-approve).
+    // Update/hapus: cuma staff (super_admin/sekretaris/wali_kelas).
+    match /izin/{izinId} {
+      allow read: if isStaff() || (isSantriUser() && resource.data.nis == santriNis());
+      allow create: if isSantriUser()
+        && request.resource.data.nis == santriNis()
+        && request.resource.data.status == 'pending'
+        && !('diprosesOleh' in request.resource.data)
+        && request.resource.data.jenisIzin in ['sakit', 'pulang', 'lainnya']
+        && request.resource.data.keys().hasAll([
+          'nis', 'nama', 'kelasId', 'jenisIzin',
+          'tanggalMulai', 'tanggalSelesai', 'alasan', 'status', 'createdAt',
+        ]);
+      allow update, delete: if isStaffKelolaIzin();
+    }
+
+    // ── izin_harian ──
+    // Catatan harian hasil persetujuan izin (id = "{nis}_{tanggal}").
+    // Dibaca staff & santri (untuk izinnya sendiri); ditulis cuma staff
+    // yang berhak mengelola izin (lewat tombol approve di app).
+    match /izin_harian/{docId} {
+      allow read: if isStaff() || (isSantriUser() && resource.data.nis == santriNis());
+      allow write: if isStaffKelolaIzin();
+    }
+
+    // ── hari_libur ──
+    // id = tanggal (YYYY-MM-DD). Semua yang login boleh baca (untuk laporan).
+    // Yang boleh menandai libur cuma super_admin/sekretaris.
+    match /hari_libur/{docId} {
+      allow read: if isLoggedIn();
+      allow write: if isAdminOrSekretaris();
+    }
+
+    // ── santri_auth ──
+    // Pemetaan anonymous uid -> NIS santri (dibuat saat santri login).
+    // Cuma owner-nya sendiri (santri) yang boleh menulis; staff boleh baca semua.
+    match /santri_auth/{uid} {
+      allow read: if isLoggedIn() && (request.auth.uid == uid || isStaff());
+      allow create, update: if isLoggedIn() && !isStaff() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // ── app_config ──
+    // Buat cek versi update — boleh dibaca semua orang yang login,
+    // cuma admin yang boleh ubah (misal pas rilis versi baru).
+    match /app_config/{configId} {
+      allow read: if isLoggedIn();
+      allow write: if isSuperAdmin();
+    }
+  }
+}
