@@ -8,11 +8,10 @@ import '../../utils/role_helper.dart';
 import '../../utils/app_theme.dart';
 import '../kelola_santri/santri_list_screen.dart';
 import '../kelola_santri/kelola_santri_screen.dart';
-import '../scan_qr/scan_qr_screen.dart';
+import '../absensi/absensi_screen.dart';
 import '../laporan/laporan_screen.dart';
 import '../akun/akun_screen.dart';
 import '../izin/kelola_izin_screen.dart';
-import '../absensi_guru/absensi_guru_screen.dart';
 import '../../widgets/entrance_animation.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -36,10 +35,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     _navItems = [
       const _NavItem(icon: Icons.class_outlined, label: 'Kelas'),
-      if (RoleHelper.bisaKelolaAbsensiGuru(role))
-        const _NavItem(icon: Icons.badge_outlined, label: 'Guru'),
-      if (RoleHelper.bisaScanAbsensi(role))
-        const _NavItem(icon: Icons.qr_code_scanner, label: 'Scan'),
       if (RoleHelper.bisaLihatLaporan(role))
         const _NavItem(icon: Icons.bar_chart_outlined, label: 'Laporan'),
       if (RoleHelper.bisaKelolaIzin(role))
@@ -53,10 +48,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     switch (label) {
       case 'Kelas':
         return _KelasTab(currentUser: widget.currentUser);
-      case 'Guru':
-        return AbsensiGuruScreen(currentUser: widget.currentUser);
-      case 'Scan':
-        return ScanQrScreen(currentUser: widget.currentUser);
       case 'Laporan':
         return LaporanScreen(currentUser: widget.currentUser);
       case 'Izin':
@@ -90,6 +81,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: _bangunHalaman(_selectedIndex),
         ),
       ),
+      floatingActionButton: RoleHelper.bisaScanAbsensi(widget.currentUser.role)
+          ? FloatingActionButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AbsensiScreen(
+                      currentUser: widget.currentUser,
+                    ),
+                  ),
+                );
+              },
+              tooltip: 'Absensi',
+              child: const Icon(Icons.qr_code_scanner, size: 28),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
