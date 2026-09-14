@@ -3,7 +3,8 @@
 ## Yang dilakukan bot ini
 - `/start` — pesan sambutan + petunjuk
 - `/daftar NIM` — santri daftarkan chat Telegram-nya, dicocokkan ke data di collection `santri`
-- `/izin alasan` — santri kirim izin, otomatis tersimpan ke collection `izin`
+- `/izin alasan` — santri kirim izin, otomatis tersimpan ke collection `izin` (format sama dengan APK NurisGo, muncul di Kelola Izin & laporan)
+- `POST /api/notifIzin` — dipanggil APK NurisGo setelah izin berhasil disimpan; bot membagikan notifikasi push ke pengurus (tanpa paket Blaze)
 
 ## Langkah deploy
 
@@ -50,6 +51,13 @@ Sebelum klik Deploy, buka bagian **Environment Variables**, tambahkan 2 variable
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | token dari BotFather (langkah 1) |
 | `FIREBASE_SERVICE_ACCOUNT_BASE64` | hasil base64 dari langkah 3 (paste hasil copy tadi) |
+| `NOTIF_SECRET` | secret bersama dengan APK NurisGo — **harus sama persis** dengan `NotifConfig.secret` di `lib/utils/constants.dart` |
+
+Nilai `NOTIF_SECRET` yang sedang dipakai APK NurisGo sekarang:
+```
+f66084396af75abe682e969c392c8691f974ea2acdcfb1bf
+```
+> Kalau `NOTIF_SECRET` di Vercel diganti, APK yang lama TIDAK akan bisa mengirim notifikasi lagi (ditahan 401). Maka ganti pula nilai di `constants.dart` lalu build ulang APK.
 
 Klik **Deploy**.
 

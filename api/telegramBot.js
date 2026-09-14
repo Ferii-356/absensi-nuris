@@ -1,43 +1,35 @@
-const admin = require("firebase-admin");
 const { Telegraf } = require("telegraf");
+const { admin, initAdmin, kirimNotifikasiPengurus, labelJenis } = require("../_shared/notify");
 
-if (!admin.apps.length) {
-  const serviceAccount = JSON.parse(
-    Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, "base64").toString("utf-8")
-  );
-
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-}
+initAdmin();
 
 const db = admin.firestore();
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
-// Kirim notifikasi ke semua pengurus (super_admin & sekretaris)
-async function kirimNotifikasiPengurus(judul, isi) {
-  const query = await db
-    .collection("users")
-    .where("role", "in", ["super_admin", "sekretaris"])
+// Awal hari (00:00 lokal) — sama dengan tanggalAwalHari() di APK.
+function awalHari(now) {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+// Cek apakah santri masih punya izin pending yang bertabrakan dengan rentang
+// [mulai, selesai]. Aturan sama dengan APK (IzinService.ajukanIzin): satu izin
+// aktif per santri, supaya jalur APK & Telegram konsisten.
+async function cekIzinAktif(db, nis, mulai, selesai) {
+  if (!nis) return false;
+  const snap = await db
+    .collection("izin")
+    .where("nis", "==", nis)
+    .where("status", "==", "pending")
     .get();
-
-  const tokens = query.docs
-    .map((doc) => doc.data().fcm_token)
-    .filter((token) => !!token);
-
-  if (tokens.length === 0) return;
-
-  try {
-    await admin.messaging().sendEachForMulticast({
-      tokens: tokens,
-      notification: {
-        title: judul,
-        body: isi,
-      },
-    });
-  } catch (error) {
-    console.error("Gagal kirim notifikasi:", error);
-  }
+  const a = mulai.getTime();
+  const b = selesai.getTime();
+  return snap.docs.some((doc) => {
+    const d = doc.data();
+    if (!d.tanggalMulai || !d.tanggalSelesai) return false;
+    const im = d.tanggalMulai.toDate().getTime();
+    const ism = d.tanggalSelesai.toDate().getTime();
+    return !(ism < a || im > b);
+  });
 }
 
 bot.start((ctx) => {
@@ -162,26 +154,52 @@ bot.action(/^izin_sesi:(maghrib|isya|subuh):(.+)$/, async (ctx) => {
     }
 
     const data = pendingDoc.data();
-    
-    // Simpan ke collection izin utama
-    await db.collection("izin").add({
+    const tanggal = awalHari(new Date());
+    const nim = data.santri_data.nim || "";
+
+    // Tolak bila santri masih punya izin pending yang bertabrakan (satu izin
+    // aktif per santri, sejalan dengan layanan di APK).
+    if (await cekIzinAktif(db, nim, tanggal, tanggal)) {
+      await pendingDoc.ref.delete();
+      await ctx.answerCbQuery("Masih ada izin pending.");
+      return ctx.editMessageText(
+        "Maaf, kamu masih punya izin pending yang belum diproses pengurus.\n" +
+        "Silakan tunggu sampai izinmu diproses sebelum mengajukan izin baru."
+      );
+    }
+
+    // Simpan ke collection izin utama — format SAMA dengan yang ditulis
+    // APK (lib/models/izin_model.dart) supaya muncul di Kelola Izin,
+    // bisa disetujui/ditolak, masuk riwayat santri, dan laporan.
+    const izinRef = await db.collection("izin").add({
+      nis: nim,
+      nama: data.santri_data.nama || "",
+      kelasId: data.santri_data.kelas_id || "",
+      jenisIzin: "lainnya",
+      tanggalMulai: admin.firestore.Timestamp.fromDate(tanggal),
+      tanggalSelesai: admin.firestore.Timestamp.fromDate(tanggal),
+      alasan: data.alasan || "",
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      // Info tambahan khas Telegram (tidak dipakai APK, aman untuk dibiarkan)
       santri_id: data.santri_id,
-      nama: data.santri_data.nama,
-      kelas_id: data.santri_data.kelas_id,
-      alasan: data.alasan,
       sesi: sesi,
       sumber: "telegram",
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
     });
 
     // Hapus data sementara
     await pendingDoc.ref.delete();
 
-    // Kirim notifikasi ke pengurus
-    await kirimNotifikasiPengurus(
-      "Izin Baru",
-      `${data.santri_data.nama} izin sesi ${sesi.toUpperCase()}: "${data.alasan}"`
-    );
+    // Notifikasi via pengirim tunggal (sama seperti api/notifIzin untuk APK)
+    const isi = `${labelJenis("lainnya")} dari ${data.santri_data.nama} — ${data.alasan}`;
+    await kirimNotifikasiPengurus("Izin Santri Baru", isi, {
+      izinId: izinRef.id,
+      nis: data.santri_data.nim || "",
+      nama: data.santri_data.nama || "",
+      jenis: "lainnya",
+      alasan: data.alasan || "",
+      sumber: "telegram",
+    });
 
     const labelSesi = sesi.charAt(0).toUpperCase() + sesi.slice(1);
     await ctx.editMessageText(
